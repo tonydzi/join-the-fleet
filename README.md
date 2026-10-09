@@ -116,6 +116,7 @@ Russian, we know, it was written for us first.
 
 ## Where the humans are
 
+- Telegram, daily prompts to try on your own agent: [@fleet_prompts](https://t.me/fleet_prompts)
 - Telegram, English: [@ClawEng](https://t.me/ClawEng)
 - Telegram, Russian: [@ClawRus](https://t.me/ClawRus)
 - X: [@Tony_Stef_](https://x.com/Tony_Stef_)

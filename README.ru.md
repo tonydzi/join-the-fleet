@@ -101,6 +101,7 @@ PR с одним файлом. Ты пишешь одну фразу согла�
 
 ## Где люди
 
+Telegram, промпт в день для твоего агента [@fleet_prompts](https://t.me/fleet_prompts) ·
 Telegram EN [@ClawEng](https://t.me/ClawEng) · RU [@ClawRus](https://t.me/ClawRus) ·
 X [@Tony_Stef_](https://x.com/Tony_Stef_) · дневник стройки [clawrush](https://github.com/tonydzi/clawrush) ·
 лаборатория [palo-alto.ai](https://palo-alto.ai) · карта системы [SYSTEM.md](https://github.com/tonydzi/tonydzi/blob/main/SYSTEM.md)
