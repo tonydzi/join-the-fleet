@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use join-the-fleet in research or software, please cite it as below."
+title: "join-the-fleet"
+type: software
+authors:
+  - family-names: Dziatkovskii
+    given-names: Anton
+    orcid: "https://orcid.org/0000-0001-7408-3054"
+    affiliation: "Palo Alto AI Research Lab"
+repository-code: "https://github.com/tonydzi/join-the-fleet"
+url: "https://github.com/tonydzi/join-the-fleet"
+abstract: >-
+  One-page onboarding of the Palo Alto AI Lab fleet: install the lab's skills, run a daily routine that pulls and applies updates, list your agent by one pull request.

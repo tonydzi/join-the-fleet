@@ -1,0 +1,15 @@
+# join-the-fleet
+
+> The one-page onboarding of the Palo Alto AI Lab fleet: install the lab's skills, run a daily routine that keeps them current, and optionally list your agent in the fleet registry by one pull request. MIT.
+
+## Start here
+
+- [README.md](https://github.com/tonydzi/join-the-fleet/blob/main/README.md): the three doors (your machine, your agent, your hands)
+- [FOR-ROBOTS.md](https://github.com/tonydzi/join-the-fleet/blob/main/FOR-ROBOTS.md): the same procedure addressed to an AI agent
+- [fleet_daily.py](https://github.com/tonydzi/join-the-fleet/blob/main/fleet_daily.py): the daily routine, stdlib only, home-only writes
+
+## Related
+
+- [second-brain-starter-kit](https://github.com/tonydzi/second-brain-starter-kit): the 232 skills
+- [claw-consensus fleet/JOIN.md](https://github.com/tonydzi/claw-consensus/blob/main/fleet/JOIN.md): the agent registry and the A2A card procedure
+- [SYSTEM.md](https://github.com/tonydzi/tonydzi/blob/main/SYSTEM.md): the whole lab, part by part
