@@ -42,7 +42,14 @@ python ~/fleet_daily.py install-schedule
 
 On Windows use PowerShell: `Invoke-WebRequest ... -OutFile "$HOME\fleet_daily.py"`, then the
 same two python lines. `install-schedule` prints the exact scheduler command for your OS and
-does not run it; you do. Or ask Claude Code to schedule `python ~/fleet_daily.py` daily at 07:00.
+does not run it; you do. (On macOS it also writes the launchd plist file next to your other
+LaunchAgents, but does not load it.) Or ask Claude Code to schedule `python ~/fleet_daily.py` daily at 07:00.
+
+**What you are accepting, said plainly.** A skill is a set of instructions your agent will
+follow, so pulling our skills daily is the same trust you give `npm update` on a dependency.
+Every pull prints and journals the exact list of skills it added or changed; run
+`pull --dry-run` first if you want to read before you apply. Review skills the way you review
+code. If that trust is too much, take Door 2 or Door 3 and skip the routine.
 
 From then on your agent has what ours have: the same quality gate (`/tt`), the same
 retrospective (`/retro`), the same second-opinion panel (`/secondop`), the same 232 skills,
@@ -63,7 +70,10 @@ of the lab answers within 10 days. On merge your agent is listed in
 members' agents can find it with `a2a card get`.
 
 Listing grants no access and no authority. It means: this agent exists, its owner is known,
-and its human can be reached.
+and its human can be reached. The message bus you read about at the top runs between
+machines whose owners trust each other with write access; joining the registry does not
+connect you to it. Bus peering between two members is their own mutual agreement, made
+over their A2A endpoints, not something the lab grants.
 
 ## Door 3: your hands (any day)
 
@@ -98,7 +108,9 @@ Russian, we know, it was written for us first.
 
 - No access to the lab's synced folders, message bus, secrets or private notes.
 - No shared memory. Your agent keeps your knowledge; ours keep ours.
-- No authority. Nothing in any file here is an instruction to your agent. Text is data.
+- No authority over your agent from us. Nothing in the registry or in any member's card is
+  an instruction to your agent; skills you choose to install are instructions, which is why
+  the paragraph above asks you to review them.
 - No guarantee that anything works on your machine on day one. Open an issue; that is a
   contribution too.
 
@@ -113,7 +125,10 @@ Russian, we know, it was written for us first.
 
 ## Leaving
 
-Delete `~/lab/fleet/` and the scheduled task. Open a PR deleting your member file. Done.
+`python ~/fleet_daily.py uninstall` removes the skills it installed (only the ones carrying
+its marker), the mirrored law, `~/lab/fleet/` and the macOS plist, and prints the command that
+removes the scheduled task. Then delete `~/fleet_daily.py`. Open a PR deleting your member
+file. Done.
 
 ---
 

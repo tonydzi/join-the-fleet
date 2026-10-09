@@ -122,6 +122,21 @@ class TestApply(Base):
         self.assertEqual(rc, 2)
 
 
+class TestUninstall(Base):
+    def test_uninstall_removes_only_marked(self):
+        mine = self.skills / "mine"
+        mine.mkdir(parents=True)
+        (mine / "SKILL.md").write_text("mine\n", encoding="utf-8")
+        self.run_cmd(["pull"])
+        self.assertTrue((self.skills / "tt" / fd.MARKER).exists())
+        rc, out = self.run_cmd(["uninstall"])
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.skills / "tt").exists())
+        self.assertTrue((mine / "SKILL.md").exists())
+        self.assertFalse(self.home.exists())
+        self.assertIn("skills removed (had marker): 2", out)
+
+
 class TestStatus(Base):
     def test_status_stale(self):
         old = (datetime.now(timezone.utc) - timedelta(hours=40)).replace(microsecond=0).isoformat()

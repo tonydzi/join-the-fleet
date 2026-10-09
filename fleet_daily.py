@@ -22,6 +22,7 @@ Usage:
   python fleet_daily.py pull [--dry-run]
   python fleet_daily.py status          # last 7 runs; STALE + exit 1 if > 36 h
   python fleet_daily.py install-schedule   # prints the scheduler command, never runs it
+  python fleet_daily.py uninstall       # removes only what this script installed
 
 Environment:
   FLEET_HOME    where the clones and the journal live (default ~/lab/fleet)
@@ -333,10 +334,41 @@ def cmd_install_schedule() -> int:
     return 0
 
 
+def cmd_uninstall() -> int:
+    """Remove only what this script installed: marked skills, law mirror, FLEET_HOME, plist."""
+    home = fleet_home()
+    removed = []
+    dest = skills_home()
+    if dest.is_dir():
+        for d in sorted(p for p in dest.iterdir() if p.is_dir()):
+            if (d / MARKER).exists():
+                shutil.rmtree(d)
+                removed.append(d.name)
+    print("skills removed (had marker): %d" % len(removed))
+    kept = [p.name for p in dest.iterdir() if p.is_dir()] if dest.is_dir() else []
+    print("skills kept (yours, no marker): %d" % len(kept))
+    plist = Path.home() / "Library" / "LaunchAgents" / "ai.palo-alto.fleet-daily.plist"
+    if plist.exists():
+        try:
+            plist.unlink()
+            print("removed %s (run: launchctl unload %s)" % (plist, plist))
+        except OSError as exc:
+            print("could not remove %s: %s" % (plist, exc))
+    if home.exists():
+        shutil.rmtree(home)
+        print("removed %s" % home)
+    if sys.platform == "win32":
+        print("now remove the task: schtasks /delete /tn \"FleetDaily\" /f")
+    elif sys.platform != "darwin":
+        print("now remove the crontab line that runs fleet_daily.py (crontab -e)")
+    print("then delete this file: %s" % Path(__file__).resolve())
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="daily pulse of a fleet machine")
     ap.add_argument("cmd", nargs="?", default="pull",
-                    choices=["init", "pull", "status", "install-schedule"])
+                    choices=["init", "pull", "status", "install-schedule", "uninstall"])
     ap.add_argument("--dry-run", action="store_true", help="fetch and show, copy nothing")
     a = ap.parse_args(argv)
     if a.cmd == "init":
@@ -345,6 +377,8 @@ def main(argv=None) -> int:
         return cmd_pull(dry_run=a.dry_run)
     if a.cmd == "status":
         return cmd_status()
+    if a.cmd == "uninstall":
+        return cmd_uninstall()
     return cmd_install_schedule()
 
 
