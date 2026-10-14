@@ -334,6 +334,20 @@ def cmd_install_schedule() -> int:
     return 0
 
 
+def _force_rmtree(path: Path) -> None:
+    """rmtree that also removes read-only files (git pack objects on Windows)."""
+    import stat
+
+    def _retry(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry)
+    else:
+        shutil.rmtree(path, onerror=_retry)
+
+
 def cmd_uninstall() -> int:
     """Remove only what this script installed: marked skills, law mirror, FLEET_HOME, plist."""
     home = fleet_home()
@@ -342,7 +356,7 @@ def cmd_uninstall() -> int:
     if dest.is_dir():
         for d in sorted(p for p in dest.iterdir() if p.is_dir()):
             if (d / MARKER).exists():
-                shutil.rmtree(d)
+                _force_rmtree(d)
                 removed.append(d.name)
     print("skills removed (had marker): %d" % len(removed))
     kept = [p.name for p in dest.iterdir() if p.is_dir()] if dest.is_dir() else []
@@ -355,7 +369,7 @@ def cmd_uninstall() -> int:
         except OSError as exc:
             print("could not remove %s: %s" % (plist, exc))
     if home.exists():
-        shutil.rmtree(home)
+        _force_rmtree(home)
         print("removed %s" % home)
     if sys.platform == "win32":
         print("now remove the task: schtasks /delete /tn \"FleetDaily\" /f")
