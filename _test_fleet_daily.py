@@ -137,6 +137,69 @@ class TestUninstall(Base):
         self.assertIn("skills removed (had marker): 2", out)
 
 
+class TestReleaseChannel(Base):
+    """Default channel follows the newest release tag, not main."""
+
+    def make_git(self, tags):
+        calls = []
+
+        def fake(args, cwd=None):
+            calls.append(list(args))
+            if args[0] == "--version":
+                return 0, "git version 0.fake"
+            if args[0] == "ls-remote":
+                return 0, "\n".join("%040d\trefs/tags/%s" % (i, t) for i, t in enumerate(tags))
+            if args[0] == "rev-parse":
+                return 0, "a" * 40
+            return 0, ""
+        return fake, calls
+
+    def tearDown(self):
+        os.environ.pop("FLEET_CHANNEL", None)
+        os.environ.pop("FLEET_PIN_KIT", None)
+        super().tearDown()
+
+    def test_picks_highest_semver_not_lexical(self):
+        fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0", "v0.2.0", "latest"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["checkout", "--quiet", "v0.10.0"], calls)
+        self.assertNotIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertIn("release v0.10.0", out)
+
+    def test_pin_overrides_for_rollback(self):
+        # pin is per repo: kit rolls back, consensus keeps following its newest tag
+        os.environ["FLEET_PIN_KIT"] = "v0.9.1"
+        fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        checkouts = [c for c in calls if c[:2] == ["checkout", "--quiet"]]
+        self.assertEqual(checkouts, [["checkout", "--quiet", "v0.9.1"],
+                                     ["checkout", "--quiet", "v0.10.0"]])
+
+    def test_pin_to_missing_tag_fails_loud(self):
+        os.environ["FLEET_PIN_KIT"] = "v9.9.9"
+        fd.run_git, calls = self.make_git(["v0.9.1"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("v9.9.9", out)
+
+    def test_no_tags_falls_back_to_main_and_says_so(self):
+        fd.run_git, calls = self.make_git([])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertIn("no release tag", out)
+
+    def test_main_channel_keeps_old_behaviour(self):
+        os.environ["FLEET_CHANNEL"] = "main"
+        fd.run_git, calls = self.make_git(["v0.10.0"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertFalse(any(c[0] == "ls-remote" for c in calls))
+
+
 class TestStatus(Base):
     def test_status_stale(self):
         old = (datetime.now(timezone.utc) - timedelta(hours=40)).replace(microsecond=0).isoformat()
