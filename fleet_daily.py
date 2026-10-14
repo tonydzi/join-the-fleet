@@ -205,9 +205,11 @@ def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
         rc, out = run_git(["log", "--oneline", "HEAD..@{u}"], cwd=repo_dir)
         rec["after"] = rec["before"]
     else:
-        if run_git(["symbolic-ref", "-q", "HEAD"], cwd=repo_dir)[0] == 1:
-            # left on a release tag by the release channel: back to the server's CURRENT
-            # default branch (master in some of our repos, main in others; it can be renamed)
+        if True:
+            # one path every time: ask origin for its CURRENT default branch (master in some
+            # of our repos, main in others; it can be renamed), fetch exactly that ref and
+            # fast-forward to it. No plain `git pull`: a shallow clone's refspec still points
+            # at the branch it was cloned from and breaks after a rename.
             rc0, out0 = run_git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo_dir)
             branch = ""
             for ln in out0.splitlines() if rc0 == 0 else []:
@@ -216,12 +218,18 @@ def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
             if not branch:
                 rec["error"] = "could not ask origin for its default branch rc=%s: %s" % (rc0, out0[-200:])
                 return rec
-            rc1, out1 = run_git(["fetch", "--quiet", "--depth", "1", "origin",
+            # no --depth here: a depth-1 fetch cuts history and the fast-forward below would
+            # see "unrelated histories"; without it git fetches only what is new
+            rc1, out1 = run_git(["fetch", "--quiet", "origin",
                                  "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)], cwd=repo_dir)
             if rc1 == 0:
                 has_local = run_git(["rev-parse", "--verify", "--quiet",
                                      "refs/heads/" + branch], cwd=repo_dir)[0] == 0
-                if has_local:
+                on_it = run_git(["symbolic-ref", "-q", "--short", "HEAD"],
+                                cwd=repo_dir)[1].strip() == branch
+                if on_it:
+                    rc1, out1 = 0, ""
+                elif has_local:
                     # never reset an existing branch: local commits must survive (ff below)
                     rc1, out1 = run_git(["checkout", "--quiet", branch], cwd=repo_dir)
                 else:
@@ -233,10 +241,8 @@ def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
             # fast-forward to exactly what was fetched; independent of the clone's
             # single-branch refspec and of whether an upstream is configured
             rc, out = run_git(["merge", "--ff-only", "--quiet", "origin/" + branch], cwd=repo_dir)
-        else:
-            rc, out = run_git(["pull", "--ff-only", "--quiet"], cwd=repo_dir)
         if rc != 0:
-            rec["error"] = "pull failed rc=%s: %s" % (rc, out[-300:])
+            rec["error"] = "fast-forward failed rc=%s: %s" % (rc, out[-300:])
             return rec
         rec["after"] = head_of(repo_dir)
         if rec["after"] and rec["after"] != rec["before"]:

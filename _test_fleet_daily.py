@@ -20,7 +20,9 @@ def fake_git_factory(heads):
             return 0, "git version 0.fake"
         if args[0] == "rev-parse":
             return 0, heads.get(str(cwd), "aaaaaaa")
-        if args[0] in ("pull", "fetch"):
+        if args[:2] == ["ls-remote", "--symref"]:
+            return 0, "ref: refs/heads/main\tHEAD"
+        if args[0] in ("pull", "fetch", "merge"):
             return 0, ""
         if args[0] == "log":
             return 0, ""
@@ -107,7 +109,7 @@ class TestApply(Base):
 
     def test_git_failure_is_fail_not_ok(self):
         def broken(args, cwd=None):
-            if args[0] == "pull":
+            if args[0] in ("pull", "merge"):
                 return 1, "fatal: cannot ff"
             return fake_git_factory({})(args, cwd)
         fd.run_git = broken
@@ -147,10 +149,14 @@ class TestReleaseChannel(Base):
             calls.append(list(args))
             if args[0] == "--version":
                 return 0, "git version 0.fake"
+            if args[:2] == ["ls-remote", "--symref"]:
+                return 0, "ref: refs/heads/main\tHEAD"
             if args[0] == "ls-remote":
                 return 0, "\n".join("%040d\trefs/tags/%s" % (i, t) for i, t in enumerate(tags))
             if args[0] == "rev-parse":
                 return 0, "a" * 40
+            if args[:2] == ["ls-remote", "--symref"]:
+                return 0, "ref: refs/heads/main\tHEAD"
             return 0, ""
         return fake, calls
 
@@ -164,7 +170,7 @@ class TestReleaseChannel(Base):
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 0, out)
         self.assertIn(["checkout", "--quiet", "--detach", "refs/tags/v0.10.0"], calls)
-        self.assertNotIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertFalse(any(c[0] == "merge" for c in calls))
         self.assertIn("release v0.10.0", out)
 
     def test_pin_overrides_for_rollback(self):
@@ -187,7 +193,7 @@ class TestReleaseChannel(Base):
         fd.run_git, calls = self.make_git([])
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 0, out)
-        self.assertIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertIn(["merge", "--ff-only", "--quiet", "origin/main"], calls)
         self.assertIn("no release tag", out)
 
     def test_main_channel_keeps_old_behaviour(self):
@@ -195,8 +201,8 @@ class TestReleaseChannel(Base):
         fd.run_git, calls = self.make_git(["v0.10.0"])
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 0, out)
-        self.assertIn(["pull", "--ff-only", "--quiet"], calls)
-        self.assertFalse(any(c[0] == "ls-remote" for c in calls))
+        self.assertIn(["merge", "--ff-only", "--quiet", "origin/main"], calls)
+        self.assertFalse(any(c[:2] == ["ls-remote", "--tags"] for c in calls))
 
     def test_network_error_is_not_no_tags(self):
         # review PR #2: a failed ls-remote used to fall through to main (unreleased code)
@@ -211,7 +217,7 @@ class TestReleaseChannel(Base):
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 1, out)
         self.assertIn("could not list release tags", out)
-        self.assertNotIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertFalse(any(c[0] == "merge" for c in calls))
         self.assertFalse(any(c[0] == "checkout" for c in calls))
 
     def test_fresh_dry_run_still_checks_pin(self):
@@ -314,6 +320,12 @@ class TestReleaseRealGit(unittest.TestCase):
         os.environ.pop("FLEET_CHANNEL")
         self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
         os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("main", self.origin))
+        # and the NEXT main run after the rename works too (review round 3)
+        (self.origin / "f.txt").write_text("later", encoding="utf-8")
+        self.g("commit", "-q", "-am", "later")
         rec = fd.pull_repo("kit", self.url, self.home, False)
         self.assertEqual(rec["error"], "", rec)
         self.assertEqual(self.sha("HEAD", repo), self.sha("main", self.origin))
