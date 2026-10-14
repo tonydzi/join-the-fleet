@@ -137,6 +137,18 @@ class TestUninstall(Base):
         self.assertIn("skills removed (had marker): 2", out)
 
 
+    def test_uninstall_survives_readonly_git_objects(self):
+        # git marks pack files read-only; on Windows plain rmtree raises WinError 5
+        self.run_cmd(["pull"])
+        ro = self.home / "kit" / ".git" / "objects" / "pack" / "pack-x.idx"
+        ro.parent.mkdir(parents=True, exist_ok=True)
+        ro.write_text("x", encoding="utf-8")
+        os.chmod(ro, 0o444)
+        rc, out = self.run_cmd(["uninstall"])
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(self.home.exists())
+
+
 class TestStatus(Base):
     def test_status_stale(self):
         old = (datetime.now(timezone.utc) - timedelta(hours=40)).replace(microsecond=0).isoformat()
