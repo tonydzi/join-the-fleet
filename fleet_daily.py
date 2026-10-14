@@ -97,11 +97,13 @@ def channel() -> str:
     return "main" if os.environ.get("FLEET_CHANNEL", "release").strip().lower() == "main" else "release"
 
 
-def release_tags(repo_dir: Path) -> list:
-    """vX.Y.Z tags on origin, newest first (numeric, not lexical)."""
-    rc, out = run_git(["ls-remote", "--tags", "--refs", "origin", "v*"], cwd=repo_dir)
+def release_tags(url: str):
+    """vX.Y.Z tags of the remote, newest first (numeric, not lexical).
+    Asks the URL, not the clone, so a fresh dry-run sees the same answer as a real pull.
+    Returns None when the remote could not be asked: that is NOT the same as 'no tags'."""
+    rc, out = run_git(["ls-remote", "--tags", "--refs", url, "v*"])
     if rc != 0:
-        return []
+        return None
     tags = []
     for line in out.splitlines():
         ref = line.split("refs/tags/")[-1].strip()
@@ -111,59 +113,71 @@ def release_tags(repo_dir: Path) -> list:
     return [t for _, t in sorted(tags, reverse=True)]
 
 
-def checkout_release(name: str, repo_dir: Path, rec: dict, dry_run: bool) -> bool:
-    """Move repo_dir to the wanted release tag. False = no tags, caller falls back to main."""
-    tags = release_tags(repo_dir)
+def wanted_release(name: str, url: str, rec: dict):
+    """Pick the tag to stand on. Returns the tag, '' for 'no tags, follow main', None on error."""
+    tags = release_tags(url)
+    if tags is None:
+        rec["error"] = "could not list release tags (network?); staying on the current version"
+        return None
     pin_var = "FLEET_PIN_" + name.upper()
     pin = os.environ.get(pin_var, "").strip()
     if pin:
         if pin not in tags:
             rec["error"] = "%s=%s is not a release tag on origin (have: %s)" % (
                 pin_var, pin, ", ".join(tags[:5]) or "none")
-            return True
-        want = pin
-    elif tags:
-        want = tags[0]
-    else:
-        return False
-    rec["ref"] = want
-    if dry_run:
-        rec["log"] = ["release %s (dry-run, not checked out)" % want]
-        return True
-    rc, out = run_git(["fetch", "--quiet", "--depth", "1", "origin", "tag", want], cwd=repo_dir)
-    if rc != 0:
-        rec["error"] = "fetch %s failed rc=%s: %s" % (want, rc, out[-300:])
-        return True
-    rc, out = run_git(["checkout", "--quiet", want], cwd=repo_dir)
-    if rc != 0:
-        rec["error"] = "checkout %s failed rc=%s: %s" % (want, rc, out[-300:])
-        return True
-    rec["after"] = head_of(repo_dir)
-    moved = rec["after"] != rec["before"]
-    rec["log"] = ["release %s%s" % (want, "" if moved else " (already here)")]
-    rec["delta"] = 1 if moved else 0
-    return True
+            return None
+        return pin
+    return tags[0] if tags else ""
 
 
 def pull_repo(name: str, url: str, home: Path, dry_run: bool) -> dict:
     """Clone if missing, then follow the release tag (default) or main."""
+    if channel() == "main":
+        return pull_main(name, url, home, dry_run)
     repo_dir = home / name
-    if channel() == "release" and not (dry_run and not (repo_dir / ".git").exists()):
-        rec = {"repo": name, "before": "", "after": "", "delta": 0, "log": [], "error": "",
-               "ref": ""}
-        if not (repo_dir / ".git").exists():
-            rc, out = run_git(["clone", "--depth", "1", url, str(repo_dir)])
-            if rc != 0:
-                rec["error"] = "clone failed rc=%s: %s" % (rc, out[-300:])
-                return rec
-        rec["before"] = head_of(repo_dir)
-        if checkout_release(name, repo_dir, rec, dry_run):
-            return rec
+    rec = {"repo": name, "before": "", "after": "", "delta": 0, "log": [], "error": "",
+           "ref": "", "cloned": False}
+    want = wanted_release(name, url, rec)
+    if want is None:
+        return rec
+    if want == "":
         main_rec = pull_main(name, url, home, dry_run)
         main_rec["log"] = ["no release tag on origin, tracking main"] + main_rec["log"]
         main_rec["ref"] = "main"
         return main_rec
-    return pull_main(name, url, home, dry_run)
+    rec["ref"] = want
+    exists = (repo_dir / ".git").exists()
+    if exists:
+        rec["before"] = head_of(repo_dir)
+    if dry_run:
+        rec["log"] = ["release %s (dry-run, nothing changed%s)" % (
+            want, "" if exists else ", would clone")]
+        return rec
+    if not exists:
+        rc, out = run_git(["clone", "--depth", "1", url, str(repo_dir)])
+        if rc != 0:
+            rec["error"] = "clone failed rc=%s: %s" % (rc, out[-300:])
+            return rec
+        rec["cloned"] = True
+    rc, out = run_git(["fetch", "--quiet", "--depth", "1", "origin", "tag", want], cwd=repo_dir)
+    if rc != 0:
+        rec["error"] = "fetch %s failed rc=%s: %s" % (want, rc, out[-300:])
+        return rec
+    # refs/tags/ + --detach: a local branch with the same name can never be picked instead
+    rc, out = run_git(["checkout", "--quiet", "--detach", "refs/tags/" + want], cwd=repo_dir)
+    if rc != 0:
+        rec["error"] = "checkout %s failed rc=%s: %s" % (want, rc, out[-300:])
+        return rec
+    rec["after"] = head_of(repo_dir)
+    rc, tag_sha = run_git(["rev-parse", "refs/tags/" + want + "^{commit}"], cwd=repo_dir)
+    if rc != 0 or not rec["after"] or tag_sha.split()[0] != rec["after"]:
+        rec["error"] = "HEAD %s is not tag %s after checkout" % (rec["after"][:7], want)
+        return rec
+    moved = rec["cloned"] or rec["after"] != rec["before"]
+    rec["log"] = ["%srelease %s%s" % ("(fresh clone) " if rec["cloned"] else "", want,
+                                      "" if moved else " (already here)")]
+    rec["delta"] = 1 if moved else 0
+    return rec
 
 
 def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
@@ -192,11 +206,23 @@ def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
         rec["after"] = rec["before"]
     else:
         if run_git(["symbolic-ref", "-q", "HEAD"], cwd=repo_dir)[0] == 1:
-            # left on a release tag by the release channel: back to the default branch
-            # (origin/HEAD, which is master in some of our repos and main in others)
-            rc0, ref = run_git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=repo_dir)
-            branch = ref.strip().split("/", 1)[-1] if rc0 == 0 and ref.strip() else "main"
-            run_git(["checkout", "--quiet", branch], cwd=repo_dir)
+            # left on a release tag by the release channel: back to the server's CURRENT
+            # default branch (master in some of our repos, main in others; it can be renamed)
+            rc0, out0 = run_git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo_dir)
+            branch = ""
+            for ln in out0.splitlines() if rc0 == 0 else []:
+                if ln.startswith("ref: refs/heads/"):
+                    branch = ln.split("refs/heads/", 1)[1].split()[0]
+            if not branch:
+                rec["error"] = "could not ask origin for its default branch rc=%s: %s" % (rc0, out0[-200:])
+                return rec
+            rc1, out1 = run_git(["fetch", "--quiet", "--depth", "1", "origin",
+                                 "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)], cwd=repo_dir)
+            if rc1 == 0:
+                rc1, out1 = run_git(["checkout", "--quiet", "-B", branch, "origin/" + branch], cwd=repo_dir)
+            if rc1 != 0:
+                rec["error"] = "could not return to %s rc=%s: %s" % (branch, rc1, out1[-200:])
+                return rec
         rc, out = run_git(["pull", "--ff-only", "--quiet"], cwd=repo_dir)
         if rc != 0:
             rec["error"] = "pull failed rc=%s: %s" % (rc, out[-300:])

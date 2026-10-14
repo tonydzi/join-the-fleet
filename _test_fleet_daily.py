@@ -163,7 +163,7 @@ class TestReleaseChannel(Base):
         fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0", "v0.2.0", "latest"])
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 0, out)
-        self.assertIn(["checkout", "--quiet", "v0.10.0"], calls)
+        self.assertIn(["checkout", "--quiet", "--detach", "refs/tags/v0.10.0"], calls)
         self.assertNotIn(["pull", "--ff-only", "--quiet"], calls)
         self.assertIn("release v0.10.0", out)
 
@@ -173,9 +173,8 @@ class TestReleaseChannel(Base):
         fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0"])
         rc, out = self.run_cmd(["pull"])
         self.assertEqual(rc, 0, out)
-        checkouts = [c for c in calls if c[:2] == ["checkout", "--quiet"]]
-        self.assertEqual(checkouts, [["checkout", "--quiet", "v0.9.1"],
-                                     ["checkout", "--quiet", "v0.10.0"]])
+        checkouts = [c[-1] for c in calls if c[:2] == ["checkout", "--quiet"]]
+        self.assertEqual(checkouts, ["refs/tags/v0.9.1", "refs/tags/v0.10.0"])
 
     def test_pin_to_missing_tag_fails_loud(self):
         os.environ["FLEET_PIN_KIT"] = "v9.9.9"
@@ -198,6 +197,98 @@ class TestReleaseChannel(Base):
         self.assertEqual(rc, 0, out)
         self.assertIn(["pull", "--ff-only", "--quiet"], calls)
         self.assertFalse(any(c[0] == "ls-remote" for c in calls))
+
+    def test_network_error_is_not_no_tags(self):
+        # review PR #2: a failed ls-remote used to fall through to main (unreleased code)
+        fake, calls = self.make_git(["v0.10.0"])
+
+        def broken(args, cwd=None):
+            if args[0] == "ls-remote":
+                calls.append(list(args))
+                return 128, "fatal: unable to access"
+            return fake(args, cwd)
+        fd.run_git = broken
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not list release tags", out)
+        self.assertNotIn(["pull", "--ff-only", "--quiet"], calls)
+        self.assertFalse(any(c[0] == "checkout" for c in calls))
+
+    def test_fresh_dry_run_still_checks_pin(self):
+        # review PR #2: dry-run on a fresh machine skipped release and pin entirely
+        import shutil as _sh
+        _sh.rmtree(self.home / "kit")
+        os.environ["FLEET_PIN_KIT"] = "v9.9.9"
+        fd.run_git, calls = self.make_git(["v0.9.1"])
+        rc, out = self.run_cmd(["pull", "--dry-run"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("v9.9.9", out)
+        self.assertFalse(any(c[0] == "clone" for c in calls))
+
+
+class TestReleaseRealGit(unittest.TestCase):
+    """Real git, no mocks: a local branch named like the tag must not be picked."""
+
+    def setUp(self):
+        import shutil as _sh
+        import subprocess as _sp
+        if _sh.which("git") is None:
+            self.skipTest("git not installed")
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.origin = root / "origin"
+        self.origin.mkdir()
+
+        def g(*a, cwd=None):
+            _sp.run(["git"] + list(a), cwd=str(cwd or self.origin), check=True,
+                    capture_output=True, text=True)
+        self.g = g
+        g("init", "-q", "-b", "master")
+        g("config", "user.email", "t@example.invalid")
+        g("config", "user.name", "t")
+        for i, tag in enumerate(["v0.9.1", "v0.10.0", None]):
+            (self.origin / "f.txt").write_text(str(i), encoding="utf-8")
+            g("add", "f.txt")
+            g("commit", "-q", "-m", "c%d" % i)
+            if tag:
+                g("tag", tag)
+        self.home = root / "fleet"
+        os.environ["FLEET_HOME"] = str(self.home)
+        os.environ["SKILLS_HOME"] = str(root / "skills")
+        self.url = self.origin.as_uri()
+
+    def tearDown(self):
+        for k in ("FLEET_HOME", "SKILLS_HOME", "FLEET_CHANNEL"):
+            os.environ.pop(k, None)
+        self.tmp.cleanup()
+
+    def sha(self, ref, cwd):
+        import subprocess as _sp
+        return _sp.run(["git", "rev-parse", ref], cwd=str(cwd), capture_output=True,
+                       text=True).stdout.strip()
+
+    def test_tag_wins_over_same_named_branch_and_main_returns(self):
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertTrue(rec["cloned"])
+        repo = self.home / "kit"
+        tag_sha = self.sha("v0.10.0^{commit}", self.origin)
+        self.assertEqual(self.sha("HEAD", repo), tag_sha)
+        # a local branch called like the tag, on another commit
+        self.g("checkout", "-q", "-b", "v0.10.0", cwd=repo)
+        (repo / "trap.txt").write_text("trap", encoding="utf-8")
+        self.g("add", "trap.txt", cwd=repo)
+        self.g("-c", "user.email=t@example.invalid", "-c", "user.name=t",
+               "commit", "-q", "-m", "trap", cwd=repo)
+        self.assertNotEqual(self.sha("HEAD", repo), tag_sha)
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), tag_sha)
+        # main channel goes back to origin's default branch (master here)
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("master", self.origin))
 
 
 class TestStatus(Base):
