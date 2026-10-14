@@ -219,11 +219,22 @@ def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
             rc1, out1 = run_git(["fetch", "--quiet", "--depth", "1", "origin",
                                  "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)], cwd=repo_dir)
             if rc1 == 0:
-                rc1, out1 = run_git(["checkout", "--quiet", "-B", branch, "origin/" + branch], cwd=repo_dir)
+                has_local = run_git(["rev-parse", "--verify", "--quiet",
+                                     "refs/heads/" + branch], cwd=repo_dir)[0] == 0
+                if has_local:
+                    # never reset an existing branch: local commits must survive (ff below)
+                    rc1, out1 = run_git(["checkout", "--quiet", branch], cwd=repo_dir)
+                else:
+                    rc1, out1 = run_git(["checkout", "--quiet", "-b", branch,
+                                         "origin/" + branch], cwd=repo_dir)
             if rc1 != 0:
                 rec["error"] = "could not return to %s rc=%s: %s" % (branch, rc1, out1[-200:])
                 return rec
-        rc, out = run_git(["pull", "--ff-only", "--quiet"], cwd=repo_dir)
+            # fast-forward to exactly what was fetched; independent of the clone's
+            # single-branch refspec and of whether an upstream is configured
+            rc, out = run_git(["merge", "--ff-only", "--quiet", "origin/" + branch], cwd=repo_dir)
+        else:
+            rc, out = run_git(["pull", "--ff-only", "--quiet"], cwd=repo_dir)
         if rc != 0:
             rec["error"] = "pull failed rc=%s: %s" % (rc, out[-300:])
             return rec

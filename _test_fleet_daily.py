@@ -290,6 +290,34 @@ class TestReleaseRealGit(unittest.TestCase):
         self.assertEqual(rec["error"], "", rec)
         self.assertEqual(self.sha("HEAD", repo), self.sha("master", self.origin))
 
+    def test_main_return_keeps_local_commits_and_follows_rename(self):
+        repo = self.home / "kit"
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        os.environ["FLEET_CHANNEL"] = "main"
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        # a local commit on master, then back to a release tag
+        (repo / "mine.txt").write_text("mine", encoding="utf-8")
+        self.g("add", "mine.txt", cwd=repo)
+        self.g("-c", "user.email=t@example.invalid", "-c", "user.name=t",
+               "commit", "-q", "-m", "mine", cwd=repo)
+        mine = self.sha("HEAD", repo)
+        os.environ.pop("FLEET_CHANNEL")
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        # main again: must refuse to drop the local commit, not reset it away
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(self.sha("master", repo), mine)
+        # the server renames master -> main and moves on
+        self.g("branch", "-m", "master", "main")
+        (self.origin / "f.txt").write_text("after rename", encoding="utf-8")
+        self.g("commit", "-q", "-am", "after rename")
+        os.environ.pop("FLEET_CHANNEL")
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("main", self.origin))
+
 
 class TestStatus(Base):
     def test_status_stale(self):
