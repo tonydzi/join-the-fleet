@@ -20,7 +20,9 @@ def fake_git_factory(heads):
             return 0, "git version 0.fake"
         if args[0] == "rev-parse":
             return 0, heads.get(str(cwd), "aaaaaaa")
-        if args[0] in ("pull", "fetch"):
+        if args[:2] == ["ls-remote", "--symref"]:
+            return 0, "ref: refs/heads/main\tHEAD"
+        if args[0] in ("pull", "fetch", "merge"):
             return 0, ""
         if args[0] == "log":
             return 0, ""
@@ -107,7 +109,7 @@ class TestApply(Base):
 
     def test_git_failure_is_fail_not_ok(self):
         def broken(args, cwd=None):
-            if args[0] == "pull":
+            if args[0] in ("pull", "merge"):
                 return 1, "fatal: cannot ff"
             return fake_git_factory({})(args, cwd)
         fd.run_git = broken
@@ -135,6 +137,198 @@ class TestUninstall(Base):
         self.assertTrue((mine / "SKILL.md").exists())
         self.assertFalse(self.home.exists())
         self.assertIn("skills removed (had marker): 2", out)
+
+
+class TestReleaseChannel(Base):
+    """Default channel follows the newest release tag, not main."""
+
+    def make_git(self, tags):
+        calls = []
+
+        def fake(args, cwd=None):
+            calls.append(list(args))
+            if args[0] == "--version":
+                return 0, "git version 0.fake"
+            if args[:2] == ["ls-remote", "--symref"]:
+                return 0, "ref: refs/heads/main\tHEAD"
+            if args[0] == "ls-remote":
+                return 0, "\n".join("%040d\trefs/tags/%s" % (i, t) for i, t in enumerate(tags))
+            if args[0] == "rev-parse":
+                return 0, "a" * 40
+            if args[:2] == ["ls-remote", "--symref"]:
+                return 0, "ref: refs/heads/main\tHEAD"
+            return 0, ""
+        return fake, calls
+
+    def tearDown(self):
+        os.environ.pop("FLEET_CHANNEL", None)
+        os.environ.pop("FLEET_PIN_KIT", None)
+        super().tearDown()
+
+    def test_picks_highest_semver_not_lexical(self):
+        fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0", "v0.2.0", "latest"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["checkout", "--quiet", "--detach", "refs/tags/v0.10.0"], calls)
+        self.assertFalse(any(c[0] == "merge" for c in calls))
+        self.assertIn("release v0.10.0", out)
+
+    def test_pin_overrides_for_rollback(self):
+        # pin is per repo: kit rolls back, consensus keeps following its newest tag
+        os.environ["FLEET_PIN_KIT"] = "v0.9.1"
+        fd.run_git, calls = self.make_git(["v0.9.1", "v0.10.0"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        checkouts = [c[-1] for c in calls if c[:2] == ["checkout", "--quiet"]]
+        self.assertEqual(checkouts, ["refs/tags/v0.9.1", "refs/tags/v0.10.0"])
+
+    def test_pin_to_missing_tag_fails_loud(self):
+        os.environ["FLEET_PIN_KIT"] = "v9.9.9"
+        fd.run_git, calls = self.make_git(["v0.9.1"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("v9.9.9", out)
+
+    def test_no_tags_falls_back_to_main_and_says_so(self):
+        fd.run_git, calls = self.make_git([])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["merge", "--ff-only", "--quiet", "origin/main"], calls)
+        self.assertIn("no release tag", out)
+
+    def test_main_channel_keeps_old_behaviour(self):
+        os.environ["FLEET_CHANNEL"] = "main"
+        fd.run_git, calls = self.make_git(["v0.10.0"])
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(["merge", "--ff-only", "--quiet", "origin/main"], calls)
+        self.assertFalse(any(c[:2] == ["ls-remote", "--tags"] for c in calls))
+
+    def test_network_error_is_not_no_tags(self):
+        # review PR #2: a failed ls-remote used to fall through to main (unreleased code)
+        fake, calls = self.make_git(["v0.10.0"])
+
+        def broken(args, cwd=None):
+            if args[0] == "ls-remote":
+                calls.append(list(args))
+                return 128, "fatal: unable to access"
+            return fake(args, cwd)
+        fd.run_git = broken
+        rc, out = self.run_cmd(["pull"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not list release tags", out)
+        self.assertFalse(any(c[0] == "merge" for c in calls))
+        self.assertFalse(any(c[0] == "checkout" for c in calls))
+
+    def test_fresh_dry_run_still_checks_pin(self):
+        # review PR #2: dry-run on a fresh machine skipped release and pin entirely
+        import shutil as _sh
+        _sh.rmtree(self.home / "kit")
+        os.environ["FLEET_PIN_KIT"] = "v9.9.9"
+        fd.run_git, calls = self.make_git(["v0.9.1"])
+        rc, out = self.run_cmd(["pull", "--dry-run"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("v9.9.9", out)
+        self.assertFalse(any(c[0] == "clone" for c in calls))
+
+
+class TestReleaseRealGit(unittest.TestCase):
+    """Real git, no mocks: a local branch named like the tag must not be picked."""
+
+    def setUp(self):
+        import shutil as _sh
+        import subprocess as _sp
+        if _sh.which("git") is None:
+            self.skipTest("git not installed")
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.origin = root / "origin"
+        self.origin.mkdir()
+
+        def g(*a, cwd=None):
+            _sp.run(["git"] + list(a), cwd=str(cwd or self.origin), check=True,
+                    capture_output=True, text=True)
+        self.g = g
+        g("init", "-q", "-b", "master")
+        g("config", "user.email", "t@example.invalid")
+        g("config", "user.name", "t")
+        for i, tag in enumerate(["v0.9.1", "v0.10.0", None]):
+            (self.origin / "f.txt").write_text(str(i), encoding="utf-8")
+            g("add", "f.txt")
+            g("commit", "-q", "-m", "c%d" % i)
+            if tag:
+                g("tag", tag)
+        self.home = root / "fleet"
+        os.environ["FLEET_HOME"] = str(self.home)
+        os.environ["SKILLS_HOME"] = str(root / "skills")
+        self.url = self.origin.as_uri()
+
+    def tearDown(self):
+        for k in ("FLEET_HOME", "SKILLS_HOME", "FLEET_CHANNEL"):
+            os.environ.pop(k, None)
+        self.tmp.cleanup()
+
+    def sha(self, ref, cwd):
+        import subprocess as _sp
+        return _sp.run(["git", "rev-parse", ref], cwd=str(cwd), capture_output=True,
+                       text=True).stdout.strip()
+
+    def test_tag_wins_over_same_named_branch_and_main_returns(self):
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertTrue(rec["cloned"])
+        repo = self.home / "kit"
+        tag_sha = self.sha("v0.10.0^{commit}", self.origin)
+        self.assertEqual(self.sha("HEAD", repo), tag_sha)
+        # a local branch called like the tag, on another commit
+        self.g("checkout", "-q", "-b", "v0.10.0", cwd=repo)
+        (repo / "trap.txt").write_text("trap", encoding="utf-8")
+        self.g("add", "trap.txt", cwd=repo)
+        self.g("-c", "user.email=t@example.invalid", "-c", "user.name=t",
+               "commit", "-q", "-m", "trap", cwd=repo)
+        self.assertNotEqual(self.sha("HEAD", repo), tag_sha)
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), tag_sha)
+        # main channel goes back to origin's default branch (master here)
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("master", self.origin))
+
+    def test_main_return_keeps_local_commits_and_follows_rename(self):
+        repo = self.home / "kit"
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        os.environ["FLEET_CHANNEL"] = "main"
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        # a local commit on master, then back to a release tag
+        (repo / "mine.txt").write_text("mine", encoding="utf-8")
+        self.g("add", "mine.txt", cwd=repo)
+        self.g("-c", "user.email=t@example.invalid", "-c", "user.name=t",
+               "commit", "-q", "-m", "mine", cwd=repo)
+        mine = self.sha("HEAD", repo)
+        os.environ.pop("FLEET_CHANNEL")
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        # main again: must refuse to drop the local commit, not reset it away
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(self.sha("master", repo), mine)
+        # the server renames master -> main and moves on
+        self.g("branch", "-m", "master", "main")
+        (self.origin / "f.txt").write_text("after rename", encoding="utf-8")
+        self.g("commit", "-q", "-am", "after rename")
+        os.environ.pop("FLEET_CHANNEL")
+        self.assertEqual(fd.pull_repo("kit", self.url, self.home, False)["error"], "")
+        os.environ["FLEET_CHANNEL"] = "main"
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("main", self.origin))
+        # and the NEXT main run after the rename works too (review round 3)
+        (self.origin / "f.txt").write_text("later", encoding="utf-8")
+        self.g("commit", "-q", "-am", "later")
+        rec = fd.pull_repo("kit", self.url, self.home, False)
+        self.assertEqual(rec["error"], "", rec)
+        self.assertEqual(self.sha("HEAD", repo), self.sha("main", self.origin))
 
 
 class TestStatus(Base):
