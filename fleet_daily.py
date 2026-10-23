@@ -27,6 +27,10 @@ Usage:
 Environment:
   FLEET_HOME    where the clones and the journal live (default ~/lab/fleet)
   SKILLS_HOME   where skills are installed (default ~/.claude/skills)
+  FLEET_CHANNEL release (default): follow the newest vX.Y.Z tag, so one bad
+                commit on main never reaches every machine; main: follow main
+  FLEET_PIN_KIT, FLEET_PIN_CONSENSUS
+                stay on this exact tag of that repo (rollback), e.g. FLEET_PIN_KIT=v0.8.0
 
 Exit codes: 0 ok, 1 git failure or STALE, 2 git not installed.
 Standard library only. Python 3.9+. Windows, macOS, Linux.
@@ -38,6 +42,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -85,7 +90,97 @@ def head_of(repo_dir: Path) -> str:
     return out.split()[0] if rc == 0 and out else ""
 
 
+TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+
+def channel() -> str:
+    return "main" if os.environ.get("FLEET_CHANNEL", "release").strip().lower() == "main" else "release"
+
+
+def release_tags(url: str):
+    """vX.Y.Z tags of the remote, newest first (numeric, not lexical).
+    Asks the URL, not the clone, so a fresh dry-run sees the same answer as a real pull.
+    Returns None when the remote could not be asked: that is NOT the same as 'no tags'."""
+    rc, out = run_git(["ls-remote", "--tags", "--refs", url, "v*"])
+    if rc != 0:
+        return None
+    tags = []
+    for line in out.splitlines():
+        ref = line.split("refs/tags/")[-1].strip()
+        m = TAG_RE.match(ref)
+        if m:
+            tags.append((tuple(int(x) for x in m.groups()), ref))
+    return [t for _, t in sorted(tags, reverse=True)]
+
+
+def wanted_release(name: str, url: str, rec: dict):
+    """Pick the tag to stand on. Returns the tag, '' for 'no tags, follow main', None on error."""
+    tags = release_tags(url)
+    if tags is None:
+        rec["error"] = "could not list release tags (network?); staying on the current version"
+        return None
+    pin_var = "FLEET_PIN_" + name.upper()
+    pin = os.environ.get(pin_var, "").strip()
+    if pin:
+        if pin not in tags:
+            rec["error"] = "%s=%s is not a release tag on origin (have: %s)" % (
+                pin_var, pin, ", ".join(tags[:5]) or "none")
+            return None
+        return pin
+    return tags[0] if tags else ""
+
+
 def pull_repo(name: str, url: str, home: Path, dry_run: bool) -> dict:
+    """Clone if missing, then follow the release tag (default) or main."""
+    if channel() == "main":
+        return pull_main(name, url, home, dry_run)
+    repo_dir = home / name
+    rec = {"repo": name, "before": "", "after": "", "delta": 0, "log": [], "error": "",
+           "ref": "", "cloned": False}
+    want = wanted_release(name, url, rec)
+    if want is None:
+        return rec
+    if want == "":
+        main_rec = pull_main(name, url, home, dry_run)
+        main_rec["log"] = ["no release tag on origin, tracking main"] + main_rec["log"]
+        main_rec["ref"] = "main"
+        return main_rec
+    rec["ref"] = want
+    exists = (repo_dir / ".git").exists()
+    if exists:
+        rec["before"] = head_of(repo_dir)
+    if dry_run:
+        rec["log"] = ["release %s (dry-run, nothing changed%s)" % (
+            want, "" if exists else ", would clone")]
+        return rec
+    if not exists:
+        rc, out = run_git(["clone", "--depth", "1", url, str(repo_dir)])
+        if rc != 0:
+            rec["error"] = "clone failed rc=%s: %s" % (rc, out[-300:])
+            return rec
+        rec["cloned"] = True
+    rc, out = run_git(["fetch", "--quiet", "--depth", "1", "origin", "tag", want], cwd=repo_dir)
+    if rc != 0:
+        rec["error"] = "fetch %s failed rc=%s: %s" % (want, rc, out[-300:])
+        return rec
+    # refs/tags/ + --detach: a local branch with the same name can never be picked instead
+    rc, out = run_git(["checkout", "--quiet", "--detach", "refs/tags/" + want], cwd=repo_dir)
+    if rc != 0:
+        rec["error"] = "checkout %s failed rc=%s: %s" % (want, rc, out[-300:])
+        return rec
+    rec["after"] = head_of(repo_dir)
+    rc, tag_sha = run_git(["rev-parse", "refs/tags/" + want + "^{commit}"], cwd=repo_dir)
+    if rc != 0 or not rec["after"] or tag_sha.split()[0] != rec["after"]:
+        rec["error"] = "HEAD %s is not tag %s after checkout" % (rec["after"][:7], want)
+        return rec
+    moved = rec["cloned"] or rec["after"] != rec["before"]
+    rec["log"] = ["%srelease %s%s" % ("(fresh clone) " if rec["cloned"] else "", want,
+                                      "" if moved else " (already here)")]
+    rec["delta"] = 1 if moved else 0
+    return rec
+
+
+def pull_main(name: str, url: str, home: Path, dry_run: bool) -> dict:
     """Clone if missing, otherwise fetch+ff. Returns a delta record."""
     repo_dir = home / name
     rec = {"repo": name, "before": "", "after": "", "delta": 0, "log": [], "error": ""}
@@ -110,9 +205,44 @@ def pull_repo(name: str, url: str, home: Path, dry_run: bool) -> dict:
         rc, out = run_git(["log", "--oneline", "HEAD..@{u}"], cwd=repo_dir)
         rec["after"] = rec["before"]
     else:
-        rc, out = run_git(["pull", "--ff-only", "--quiet"], cwd=repo_dir)
+        if True:
+            # one path every time: ask origin for its CURRENT default branch (master in some
+            # of our repos, main in others; it can be renamed), fetch exactly that ref and
+            # fast-forward to it. No plain `git pull`: a shallow clone's refspec still points
+            # at the branch it was cloned from and breaks after a rename.
+            rc0, out0 = run_git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo_dir)
+            branch = ""
+            for ln in out0.splitlines() if rc0 == 0 else []:
+                if ln.startswith("ref: refs/heads/"):
+                    branch = ln.split("refs/heads/", 1)[1].split()[0]
+            if not branch:
+                rec["error"] = "could not ask origin for its default branch rc=%s: %s" % (rc0, out0[-200:])
+                return rec
+            # no --depth here: a depth-1 fetch cuts history and the fast-forward below would
+            # see "unrelated histories"; without it git fetches only what is new
+            rc1, out1 = run_git(["fetch", "--quiet", "origin",
+                                 "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)], cwd=repo_dir)
+            if rc1 == 0:
+                has_local = run_git(["rev-parse", "--verify", "--quiet",
+                                     "refs/heads/" + branch], cwd=repo_dir)[0] == 0
+                on_it = run_git(["symbolic-ref", "-q", "--short", "HEAD"],
+                                cwd=repo_dir)[1].strip() == branch
+                if on_it:
+                    rc1, out1 = 0, ""
+                elif has_local:
+                    # never reset an existing branch: local commits must survive (ff below)
+                    rc1, out1 = run_git(["checkout", "--quiet", branch], cwd=repo_dir)
+                else:
+                    rc1, out1 = run_git(["checkout", "--quiet", "-b", branch,
+                                         "origin/" + branch], cwd=repo_dir)
+            if rc1 != 0:
+                rec["error"] = "could not return to %s rc=%s: %s" % (branch, rc1, out1[-200:])
+                return rec
+            # fast-forward to exactly what was fetched; independent of the clone's
+            # single-branch refspec and of whether an upstream is configured
+            rc, out = run_git(["merge", "--ff-only", "--quiet", "origin/" + branch], cwd=repo_dir)
         if rc != 0:
-            rec["error"] = "pull failed rc=%s: %s" % (rc, out[-300:])
+            rec["error"] = "fast-forward failed rc=%s: %s" % (rc, out[-300:])
             return rec
         rec["after"] = head_of(repo_dir)
         if rec["after"] and rec["after"] != rec["before"]:
