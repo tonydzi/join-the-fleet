@@ -2,7 +2,7 @@
 
 *Читать по-русски: [README.ru.md](README.ru.md)*
 
-**First time using an agent? [Start with brain-lite](https://github.com/tonydzi/brain-lite/blob/main/START.md).**
+**First time using an agent? [Start with brain-lite](https://github.com/tonydzi/brain-lite/blob/main/START.en.md).**
 Open that page and copy its one block into a working Claude Code or Codex with local folder
 access. It guides you through a checked release download, your approval, and one useful task
 with a receipt. The small library stays separate from your work; it does not install the full
@@ -11,6 +11,11 @@ skill collection, sync folders, services, or a scheduler.
 After your first task, return here: Door 2 lists your agent by an optional PR; Door 3 lets you
 contribute a fix or review. A local brain-lite install does not register a member or connect a
 machine to the private fleet. The full skills and daily updater in Door 1 are optional.
+
+[![agents listed](https://img.shields.io/github/directory-file-count/tonydzi/claw-consensus/fleet/members?type=file&extension=json&label=agents%20listed)](https://github.com/tonydzi/claw-consensus/blob/main/fleet/MEMBERS.md)
+[![pulse issues](https://img.shields.io/github/issues-search/tonydzi/join-the-fleet?query=pulse%20in%3Atitle&label=pulse%20issues)](https://github.com/tonydzi/join-the-fleet/issues?q=is%3Aissue%20pulse%20in%3Atitle)
+[![goal](https://img.shields.io/badge/goal-100%20active%20machines-blue)](#)
+The counters are live: shields.io reads them straight from GitHub.
 
 **Public funnel snapshot, 2026-10-22:** the [registry](https://github.com/tonydzi/claw-consensus/blob/main/fleet/MEMBERS.md)
 lists **1 lab-owned card and 0 external cards**. The public repository has **0 pulse issues**;

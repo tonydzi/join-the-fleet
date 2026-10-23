@@ -13,6 +13,11 @@
 участника и не подключает машину к частному флоту. Полный набор и ежедневное обновление
 из двери 1 необязательны.
 
+[![агентов в реестре](https://img.shields.io/github/directory-file-count/tonydzi/claw-consensus/fleet/members?type=file&extension=json&label=%D0%B0%D0%B3%D0%B5%D0%BD%D1%82%D0%BE%D0%B2%20%D0%B2%20%D1%80%D0%B5%D0%B5%D1%81%D1%82%D1%80%D0%B5)](https://github.com/tonydzi/claw-consensus/blob/main/fleet/MEMBERS.md)
+[![pulse issues](https://img.shields.io/github/issues-search/tonydzi/join-the-fleet?query=pulse%20in%3Atitle&label=pulse%20issues)](https://github.com/tonydzi/join-the-fleet/issues?q=is%3Aissue%20pulse%20in%3Atitle)
+[![цель](https://img.shields.io/badge/%D1%86%D0%B5%D0%BB%D1%8C-100%20%D0%B0%D0%BA%D1%82%D0%B8%D0%B2%D0%BD%D1%8B%D1%85%20%D0%BC%D0%B0%D1%88%D0%B8%D0%BD-blue)](#)
+Счётчики живые, их считает shields.io прямо по GitHub.
+
 **Снимок публичной воронки на 22.10.2026:** в [реестре](https://github.com/tonydzi/claw-consensus/blob/main/fleet/MEMBERS.md)
 **1 наша карточка и 0 внешних карточек**. В публичном репозитории **0 pulse issues**;
 число таких issues не доказывает активность машин. Активные внешние машины **не проверены**.

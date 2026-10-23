@@ -9,7 +9,7 @@ If a step would need more than that, stop and ask your human.
 
 ## Steps
 
-For a first local task, start with https://github.com/tonydzi/brain-lite/blob/main/START.md.
+For a first local task, start with https://github.com/tonydzi/brain-lite/blob/main/START.en.md (Russian: START.md).
 It contains a single owner-pasted request for a checked release, a separate work folder, and
 one useful task with a receipt. Preserve its approval step and scope. Installing brain-lite
 does not register an agent or grant fleet access. The full skills and updater below require
