@@ -2,6 +2,8 @@
 
 *Читать по-русски: [README.ru.md](README.ru.md)*
 
+**Already running your own Claude Code/Codex setup?** Use the [existing-setup guide (proposed revision)](https://github.com/tonydzi/second-brain-starter-kit/blob/codex/dima-brain-H55019/docs/EXISTING-SETUP.ru.md) to add the current method and standalone local memory while preserving your rules. It includes a fresh-chat acceptance check. Personal memory does not require fleet membership or sharing notes.
+
 **First time using an agent? [Start with brain-lite](https://github.com/tonydzi/brain-lite/blob/main/START.en.md).**
 Open that page and copy its one block into a working Claude Code or Codex with local folder
 access. It guides you through a checked release download, your approval, and one useful task
