@@ -7,6 +7,8 @@ gave you this link. Here is what to do, in order, and what to tell them afterwar
 Every step below writes only inside your human's home directory and talks only to github.com.
 If a step would need more than that, stop and ask your human.
 
+**Works with Codex and Claude Code.** Setup for both agents is in the [README](README.md).
+
 ## Steps
 
 For a first local task, start with https://github.com/tonydzi/brain-lite/blob/main/START.en.md (Russian: START.md).

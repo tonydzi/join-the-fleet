@@ -10,6 +10,6 @@
 
 ## Related
 
-- [second-brain-starter-kit](https://github.com/tonydzi/second-brain-starter-kit): the 232 skills
+- [second-brain-starter-kit](https://github.com/tonydzi/second-brain-starter-kit): the 235 skills
 - [claw-consensus fleet/JOIN.md](https://github.com/tonydzi/claw-consensus/blob/main/fleet/JOIN.md): the agent registry and the A2A card procedure
 - [SYSTEM.md](https://github.com/tonydzi/tonydzi/blob/main/SYSTEM.md): the whole lab, part by part

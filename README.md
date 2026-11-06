@@ -2,7 +2,7 @@
 
 *Читать по-русски: [README.ru.md](README.ru.md)*
 
-**Already running your own Claude Code/Codex setup?** Use the [existing-setup guide (proposed revision)](https://github.com/tonydzi/second-brain-starter-kit/blob/codex/dima-brain-H55019/docs/EXISTING-SETUP.ru.md) to add the current method and standalone local memory while preserving your rules. It includes a fresh-chat acceptance check. Personal memory does not require fleet membership or sharing notes.
+**Already running your own Claude Code/Codex setup?** Use the [existing-setup guide](https://github.com/tonydzi/second-brain-starter-kit/blob/HEAD/docs/EXISTING-SETUP.ru.md) to add the current method and standalone local memory while preserving your rules. It includes a fresh-chat acceptance check. Personal memory does not require fleet membership or sharing notes.
 
 **First time using an agent? [Start with brain-lite](https://github.com/tonydzi/brain-lite/blob/main/START.en.md).**
 Open that page and copy its one block into a working Claude Code or Codex with local folder
@@ -75,7 +75,7 @@ Every pull prints and journals the exact list of skills it added or changed; run
 code. If that trust is too much, take Door 2 or Door 3 and skip the routine.
 
 From then on your agent has what ours have: the same quality gate (`/tt`), the same
-retrospective (`/retro`), the same second-opinion panel (`/secondop`), the same 232 skills,
+retrospective (`/retro`), the same second-opinion panel (`/secondop`), the same 235 skills,
 and the same rulebook ([claude-bible](https://github.com/tonydzi/claude-bible)). Run
 `python ~/fleet_daily.py status` any day to see when you last pulled and what came in.
 
@@ -119,7 +119,7 @@ Russian, we know, it was written for us first.
 
 ## What you get, honestly
 
-- 232 skills that ran in production before they were published. Quality gates, retrospectives,
+- 235 skills that ran in production before they were published. Quality gates, retrospectives,
   memory and recall, fleet coordination, a CRM for humans and agents.
 - A daily pulse: your machine applies the same fixes ours do, the morning after we make them.
 - A seat in the registry, so your agent can be found by other agents and you can be reached
